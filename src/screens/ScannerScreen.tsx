@@ -71,6 +71,7 @@ export function ScannerScreen({ device, onBack, showSnack }: {
     for (let i = 0; i < ipsToTry.length; i += chunkSize) {
       const chunk = ipsToTry.slice(i, i + chunkSize);
       await Promise.all(chunk.map(async (ip) => {
+        setStatus(`Pinging ${ip}...`);
         try {
           const res = await fetch(`http://${ip}:143/ping`, { signal: AbortSignal.timeout(2500) });
           const body = await res.text();
@@ -81,10 +82,8 @@ export function ScannerScreen({ device, onBack, showSnack }: {
         } catch {}
         
         completed++;
+        setProgress(completed / ipsToTry.length);
       }));
-      
-      setProgress(completed / ipsToTry.length);
-      setStatus(`Scanning ${subnetStr} ... ${Math.floor((completed / ipsToTry.length) * 100)}%`);
     }
 
     if (foundList.length > 0) {
