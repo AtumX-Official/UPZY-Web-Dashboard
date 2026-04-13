@@ -26,7 +26,6 @@ export function ScannerScreen({ device, onBack, showSnack }: {
     setIsScanning(true);
     setDevices([]);
     setProgress(0);
-    setLogs([]);
     setStatus("Detecting System IP...");
 
     let sysIp = "Unknown";
@@ -214,8 +213,8 @@ export function ScannerScreen({ device, onBack, showSnack }: {
               border: `1px solid ${COLORS.teal}33` 
             }}>
               {logs.map((log, idx) => (
-                <div key={idx} className="mono" style={{ fontSize: 10, color: idx < 30 ? COLORS.teal : "rgba(255,255,255,0.3)", marginBottom: 4 }}>
-                  {idx < 30 ? "➜" : "✓"} Pinging {log}...
+                <div key={idx} className="mono" style={{ fontSize: 10, color: idx < 30 && isScanning ? COLORS.teal : "rgba(255,255,255,0.3)", marginBottom: 4 }}>
+                  {idx < 30 && isScanning ? "➜" : "✓"} {log}:143 - ping
                 </div>
               ))}
             </div>
