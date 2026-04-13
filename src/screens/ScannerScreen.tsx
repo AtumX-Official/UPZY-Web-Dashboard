@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { COLORS } from "../constants";
 import { NavBar } from "../components/Shared";
 
-export function ScannerScreen({ device, onBack, showSnack }: { 
+export function ScannerScreen({ onBack, showSnack }: { 
   device: any; 
   onBack: () => void; 
   showSnack: (msg: string, color: string) => void; 
@@ -52,15 +52,9 @@ export function ScannerScreen({ device, onBack, showSnack }: {
 
     // Build a list of IPs to scan
     const ipSet = new Set<string>();
-    ipSet.add("192.168.4.1"); // Default ESP Hotspot
-    if (device.ipAddress) ipSet.add(device.ipAddress); // Previously connected IP
-
-    if (sysIp !== "Unknown") {
-      const baseIp = sysIp.split('.').slice(0, 3).join('.');
-      for (let i = 1; i <= 254; i++) {
-        ipSet.add(`${baseIp}.${i}`);
-      }
-    }
+    
+    // Testing specific IP directly
+    ipSet.add("192.168.1.33");
 
     const ipsToTry = Array.from(ipSet);
     const foundList: { ip: string; name: string; network: string }[] = [];
@@ -68,7 +62,7 @@ export function ScannerScreen({ device, onBack, showSnack }: {
     setProgress(0);
 
     // Scan IPs in chunks to prevent browser network queue limits
-    const chunkSize = 30;
+    const chunkSize = 10; // Browser network limit overcome panna reduced size
     for (let i = 0; i < ipsToTry.length; i += chunkSize) {
       const chunk = ipsToTry.slice(i, i + chunkSize);
       
@@ -78,7 +72,7 @@ export function ScannerScreen({ device, onBack, showSnack }: {
       await Promise.all(chunk.map(async (ip) => {
         setStatus(`Pinging ${ip}...`);
         try {
-          const res = await fetch(`http://${ip}:143/ping`, { signal: AbortSignal.timeout(2500) });
+          const res = await fetch(`http://${ip}:143/ping`, { signal: AbortSignal.timeout(4000) });
           const body = await res.text();
           if (body.trim().startsWith("PONG")) {
             const name = body.includes(":") ? body.split(":").slice(1).join(":").trim() : "UPZY Device";
