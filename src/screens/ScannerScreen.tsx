@@ -52,18 +52,9 @@ export function ScannerScreen({ onBack, showSnack }: {
 
     // Build a list of IPs to scan
     const ipSet = new Set<string>();
-    ipSet.add("192.168.4.1"); // Default ESP Hotspot
-    
-    // Check if a device was passed in props to prioritize its IP
-    const props = (window as any).props || {}; 
-    if (props.device?.ipAddress) ipSet.add(props.device.ipAddress);
-    
-    if (sysIp !== "Unknown") {
-      const baseIp = sysIp.split('.').slice(0, 3).join('.');
-      for (let i = 1; i <= 254; i++) {
-        ipSet.add(`${baseIp}.${i}`);
-      }
-    }
+
+    // Testing specific IP directly
+    ipSet.add("192.168.1.33");
 
     const ipsToTry = Array.from(ipSet);
     const foundList: { ip: string; name: string; network: string }[] = [];
