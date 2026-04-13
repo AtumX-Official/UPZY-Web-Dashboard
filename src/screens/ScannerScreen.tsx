@@ -66,23 +66,26 @@ export function ScannerScreen({ device, onBack, showSnack }: {
     let completed = 0;
     setProgress(0);
 
-    // Scan all IPs concurrently
-    await Promise.all(ipsToTry.map(async (ip) => {
-      try {
-        const res = await fetch(`http://${ip}:143/ping`, { signal: AbortSignal.timeout(1500) });
-        const body = await res.text();
-        if (body.trim().startsWith("PONG")) {
-          const name = body.includes(":") ? body.split(":").slice(1).join(":").trim() : "UPZY Device";
-          foundList.push({ ip, name, network: ip === "192.168.4.1" ? "Hotspot" : "WiFi" });
-        }
-      } catch {}
+    // Scan IPs in chunks to prevent browser network queue limits
+    const chunkSize = 30;
+    for (let i = 0; i < ipsToTry.length; i += chunkSize) {
+      const chunk = ipsToTry.slice(i, i + chunkSize);
+      await Promise.all(chunk.map(async (ip) => {
+        try {
+          const res = await fetch(`http://${ip}:143/ping`, { signal: AbortSignal.timeout(2500) });
+          const body = await res.text();
+          if (body.trim().startsWith("PONG")) {
+            const name = body.includes(":") ? body.split(":").slice(1).join(":").trim() : "UPZY Device";
+            foundList.push({ ip, name, network: ip === "192.168.4.1" ? "Hotspot" : "WiFi" });
+          }
+        } catch {}
+        
+        completed++;
+      }));
       
-      completed++;
-      if (completed % 10 === 0 || completed === ipsToTry.length) {
-        setProgress(completed / ipsToTry.length);
-        setStatus(`Scanning ${subnetStr} ... ${Math.floor((completed / ipsToTry.length) * 100)}%`);
-      }
-    }));
+      setProgress(completed / ipsToTry.length);
+      setStatus(`Scanning ${subnetStr} ... ${Math.floor((completed / ipsToTry.length) * 100)}%`);
+    }
 
     if (foundList.length > 0) {
       setDevices(foundList);
