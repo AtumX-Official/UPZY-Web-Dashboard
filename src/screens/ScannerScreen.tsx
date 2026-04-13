@@ -49,23 +49,46 @@ export function ScannerScreen({ device, onBack, showSnack }: {
 
     const subnetStr = sysIp !== "Unknown" ? sysIp.split('.').slice(0, 3).join('.') + '.*' : 'subnet';
 
-    for (let i = 0; i <= 100; i += 2) {
-      await new Promise(r => setTimeout(r, 40));
-      setProgress(i / 100);
-      setStatus(`Scanning ${subnetStr} ... ${i}%`);
+    // Build a list of IPs to scan
+    const ipSet = new Set<string>();
+    ipSet.add("192.168.4.1"); // Default ESP Hotspot
+    if (device.ipAddress) ipSet.add(device.ipAddress); // Previously connected IP
+
+    if (sysIp !== "Unknown") {
+      const baseIp = sysIp.split('.').slice(0, 3).join('.');
+      for (let i = 1; i <= 254; i++) {
+        ipSet.add(`${baseIp}.${i}`);
+      }
     }
-    if (device.ipAddress) {
+
+    const ipsToTry = Array.from(ipSet);
+    const foundList: { ip: string; name: string; network: string }[] = [];
+    let completed = 0;
+    setProgress(0);
+
+    // Scan all IPs concurrently
+    await Promise.all(ipsToTry.map(async (ip) => {
       try {
-        const res = await fetch(`http://${device.ipAddress}:143/ping`, { signal: AbortSignal.timeout(800) });
+        const res = await fetch(`http://${ip}:143/ping`, { signal: AbortSignal.timeout(1500) });
         const body = await res.text();
         if (body.trim().startsWith("PONG")) {
           const name = body.includes(":") ? body.split(":").slice(1).join(":").trim() : "UPZY Device";
-          setDevices([{ ip: device.ipAddress, name, network: "WiFi" }]);
-          setStatus("1 device found");
-        } else { setStatus("No UPZY devices found."); }
-      } catch { setStatus("No UPZY devices found."); }
+          foundList.push({ ip, name, network: ip === "192.168.4.1" ? "Hotspot" : "WiFi" });
+        }
+      } catch {}
+      
+      completed++;
+      if (completed % 10 === 0 || completed === ipsToTry.length) {
+        setProgress(completed / ipsToTry.length);
+        setStatus(`Scanning ${subnetStr} ... ${Math.floor((completed / ipsToTry.length) * 100)}%`);
+      }
+    }));
+
+    if (foundList.length > 0) {
+      setDevices(foundList);
+      setStatus(`${foundList.length} device(s) found`);
     } else {
-      setStatus("Enter device IP to connect");
+      setStatus("No UPZY devices found.");
     }
     setIsScanning(false);
   };
