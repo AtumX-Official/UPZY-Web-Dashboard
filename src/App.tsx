@@ -12,12 +12,17 @@ function useDeviceState() {
   const [ipAddress, setIpAddress] = useState<string | null>(localStorage.getItem("upzy_ip"));
   const [isOnline, setIsOnline] = useState(false);
 
+  // App.tsx la ping function மாத்துங்க
   const ping = async (ip: string) => {
     try {
-      const res = await fetch(`http://${ip}:143/ping`, { signal: AbortSignal.timeout(2000) });
-      const text = await res.text();
-      return text.includes("PONG");
-    } catch { return false; }
+      await fetch(`http://${ip}:143/ping`, { 
+        signal: AbortSignal.timeout(2000),
+        mode: 'no-cors'
+      });
+      return true;  // request reached = device online
+    } catch { 
+      return false;  // timeout or network error = offline
+    }
   };
 
   useEffect(() => {
