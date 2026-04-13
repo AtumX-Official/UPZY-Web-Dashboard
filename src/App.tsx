@@ -5,7 +5,7 @@ import { SplashScreen } from "./screens/SplashScreen";
 import { HomeScreen } from "./screens/HomeScreen";
 import { ScannerScreen } from "./screens/ScannerScreen";
 import { ReminderScreen } from "./screens/ReminderScreen";
-import { TimeScreen } from "./screens/TimeScreen";
+import { TimeScreen } from "./screens/TimeScreen.tsx";
 import { StatusScreen } from "./screens/StatusScreen";
 
 function useDeviceState() {
@@ -63,7 +63,7 @@ export default function App() {
   );
 
   const screens: Record<string, React.ReactNode> = {
-    home: <HomeScreen device={device} onNav={s => { if (s === "time") { const sc = screens.time; setScreen("time"); } else setScreen(s); }} />,
+    home: <HomeScreen device={device} onNav={(s: string) => { if (s === "time") { setScreen("time"); } else setScreen(s); }} />,
     scanner: <ScannerScreen device={device} onBack={() => setScreen("home")} showSnack={showSnack} />,
     reminder: <ReminderScreen device={device} onBack={() => setScreen("home")} showSnack={showSnack} />,
     time: <TimeScreen device={device} onBack={() => setScreen("home")} showSnack={showSnack} />,
