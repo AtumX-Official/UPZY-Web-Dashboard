@@ -25,11 +25,34 @@ export function ScannerScreen({ device, onBack, showSnack }: {
     setIsScanning(true);
     setDevices([]);
     setProgress(0);
-    setStatus("Detecting networks...");
+    setStatus("Detecting System IP...");
+
+    let sysIp = "Unknown";
+    try {
+      const pc = new RTCPeerConnection({ iceServers: [] });
+      pc.createDataChannel("");
+      pc.createOffer().then(offer => pc.setLocalDescription(offer));
+      await new Promise<void>((resolve) => {
+        pc.onicecandidate = (ice) => {
+          if (ice?.candidate?.candidate) {
+            const match = /([0-9]{1,3}(\.[0-9]{1,3}){3})/.exec(ice.candidate.candidate);
+            if (match) { sysIp = match[1]; resolve(); }
+          }
+        };
+        setTimeout(resolve, 1500);
+      });
+      pc.close();
+    } catch (e) {}
+
+    setStatus(sysIp !== "Unknown" ? `System IP: ${sysIp}` : "Scanning networks...");
+    if (sysIp !== "Unknown") await new Promise(r => setTimeout(r, 1200));
+
+    const subnetStr = sysIp !== "Unknown" ? sysIp.split('.').slice(0, 3).join('.') + '.*' : 'subnet';
+
     for (let i = 0; i <= 100; i += 2) {
       await new Promise(r => setTimeout(r, 40));
       setProgress(i / 100);
-      setStatus(`Scanning subnet... ${i}%`);
+      setStatus(`Scanning ${subnetStr} ... ${i}%`);
     }
     if (device.ipAddress) {
       try {

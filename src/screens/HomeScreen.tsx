@@ -10,6 +10,27 @@ export function HomeScreen({ device, onNav }: { device: any; onNav: (screen: str
     { icon: "💓", label: "Status", sub: "Health check", color: COLORS.violet, screen: "status" },
   ];
 
+  const [sysIp, setSysIp] = useState("Detecting...");
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      setSysIp(prev => prev === "Detecting..." ? "Unknown" : prev);
+    }, 1500);
+
+    try {
+      const pc = new RTCPeerConnection({ iceServers: [] });
+      pc.createDataChannel("");
+      pc.createOffer().then(offer => pc.setLocalDescription(offer));
+      pc.onicecandidate = (ice) => {
+        if (ice?.candidate?.candidate) {
+          const match = /([0-9]{1,3}(\.[0-9]{1,3}){3})/.exec(ice.candidate.candidate);
+          if (match) { setSysIp(match[1]); pc.close(); clearTimeout(timeout); }
+        }
+      };
+    } catch (e) { setSysIp("Unknown"); clearTimeout(timeout); }
+
+    return () => clearTimeout(timeout);
+  }, []);
+
   return (
     <div style={{ minHeight: "100vh", background: COLORS.bgBase }}>
       <div style={{ background: COLORS.bgCard, padding: "48px 20px 16px", borderBottom: `1px solid rgba(255,255,255,0.05)` }}>
@@ -23,7 +44,10 @@ export function HomeScreen({ device, onNav }: { device: any; onNav: (screen: str
       </div>
 
       <div style={{ padding: "20px 18px 32px" }}>
-        <p style={{ fontSize: 12, fontWeight: 500, color: "rgba(255,255,255,0.35)", marginBottom: 16 }}>Hey there, welcome back</p>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+          <p style={{ fontSize: 12, fontWeight: 500, color: "rgba(255,255,255,0.35)" }}>Hey there, welcome back</p>
+          <span className="mono" style={{ fontSize: 9, color: COLORS.teal, background: `${COLORS.teal}1A`, padding: "4px 8px", borderRadius: 8, border: `1px solid ${COLORS.teal}33` }}>Sys IP: {sysIp}</span>
+        </div>
 
         <div style={{ padding: "13px 16px", borderRadius: 18, background: `linear-gradient(135deg, ${COLORS.teal}12, ${COLORS.bgCard})`, border: `1px solid ${COLORS.teal}2E`, display: "flex", alignItems: "center", gap: 12, marginBottom: 20 }}>
           <PingDot online={device.isOnline} />
