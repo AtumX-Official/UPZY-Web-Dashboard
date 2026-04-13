@@ -11,6 +11,7 @@ export function ScannerScreen({ device, onBack, showSnack }: {
   const [progress, setProgress] = useState(0);
   const [devices, setDevices] = useState<{ ip: string; name: string; network: string }[]>([]);
   const [status, setStatus] = useState("Ready");
+  const [logs, setLogs] = useState<string[]>([]);
   const [radarAngle, setRadarAngle] = useState(0);
   const [wifiModal, setWifiModal] = useState<{ ip: string; name: string; network: string } | null>(null);
   const [ssid, setSsid] = useState("");
@@ -25,6 +26,7 @@ export function ScannerScreen({ device, onBack, showSnack }: {
     setIsScanning(true);
     setDevices([]);
     setProgress(0);
+    setLogs([]);
     setStatus("Detecting System IP...");
 
     let sysIp = "Unknown";
@@ -70,6 +72,10 @@ export function ScannerScreen({ device, onBack, showSnack }: {
     const chunkSize = 30;
     for (let i = 0; i < ipsToTry.length; i += chunkSize) {
       const chunk = ipsToTry.slice(i, i + chunkSize);
+      
+      // Add chunk of IPs to the top of our log list
+      setLogs(prev => [...chunk, ...prev]);
+
       await Promise.all(chunk.map(async (ip) => {
         setStatus(`Pinging ${ip}...`);
         try {
@@ -200,6 +206,19 @@ export function ScannerScreen({ device, onBack, showSnack }: {
           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", marginTop: 24 }}>
             <RadarCanvas />
             <p className="mono" style={{ fontSize: 9, color: "rgba(255,255,255,0.2)", marginTop: 8 }}>{status}</p>
+            
+            <div style={{ 
+              width: "100%", marginTop: 16, padding: 12, 
+              background: "rgba(0,0,0,0.2)", borderRadius: 12, 
+              maxHeight: 140, overflowY: "auto", 
+              border: `1px solid ${COLORS.teal}33` 
+            }}>
+              {logs.map((log, idx) => (
+                <div key={idx} className="mono" style={{ fontSize: 10, color: idx < 30 ? COLORS.teal : "rgba(255,255,255,0.3)", marginBottom: 4 }}>
+                  {idx < 30 ? "➜" : "✓"} Pinging {log}...
+                </div>
+              ))}
+            </div>
           </div>
         )}
       </div>
