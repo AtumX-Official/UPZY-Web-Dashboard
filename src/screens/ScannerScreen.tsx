@@ -49,7 +49,7 @@ export function ScannerScreen({ device, onBack, showSnack }: {
     setStatus(sysIp !== "Unknown" ? `System IP: ${sysIp}` : "Scanning networks...");
     if (sysIp !== "Unknown") await new Promise(r => setTimeout(r, 1200));
 
-    const subnetStr = sysIp !== "Unknown" ? sysIp.split('.').slice(0, 3).join('.') + '.*' : 'subnet';
+    // const subnetStr = sysIp !== "Unknown" ? sysIp.split('.').slice(0, 3).join('.') + '.*' : 'subnet';
 
     // Build a list of IPs to scan
     const ipSet = new Set<string>();
