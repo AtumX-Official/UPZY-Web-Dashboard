@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { COLORS } from "../constants";
 import { NavBar, FieldTile, ShimmerBtn } from "../components/Shared";
+import { getDatabase, ref, set } from "firebase/database";
 
 export function TimeScreen({ device, onBack, showSnack }: { 
   device: any; 
@@ -22,9 +23,14 @@ export function TimeScreen({ device, onBack, showSnack }: {
     const d = now;
     const date = `${String(d.getDate()).padStart(2,"0")}-${String(d.getMonth()+1).padStart(2,"0")}-${d.getFullYear()}`;
     const time = `${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}:${String(d.getSeconds()).padStart(2,"0")}`;
+    const formattedTime = `${date}|${time}`;
     try {
-      await fetch(`http://${device.ipAddress}:143/Live/${date}|${time}`, { signal: AbortSignal.timeout(3000) });
-      showSnack("Time synced to device", COLORS.teal);
+      // Update the formatted time in Firebase Realtime Database
+      const db = getDatabase();
+      await set(ref(db, `devices/${device.ipAddress}/time`), formattedTime);
+
+      await fetch(`http://${device.ipAddress}:143/Live/${formattedTime}`, { signal: AbortSignal.timeout(3000) });
+      showSnack("Time synced to Firebase & device", COLORS.teal);
       setLastSync(new Date());
     } catch { showSnack("Failed to send time", COLORS.coral); }
     setSyncing(false);
@@ -42,7 +48,7 @@ export function TimeScreen({ device, onBack, showSnack }: {
         </div>
         <FieldTile color={COLORS.amber}>
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            {[["Device", device.ipAddress || "Not connected", "💾"], ["Status", device.isOnline ? "Online" : "Offline", device.isOnline ? "✅" : "❌"], ["Last sync", lastSync ? lastSync.toLocaleTimeString() : "Never", "🕐"]].map(([label, val, icon]) => (
+            {[["Device", device.ipAddress || "Not connected", "💾"], ["Status", device.isOnline ? "Online" : "Offline", device.isOnline ? "✅" : "❌"]].map(([label, val, icon]) => (
               <div key={label} style={{ display: "flex", alignItems: "center", gap: 10 }}>
                 <span style={{ fontSize: 15 }}>{icon}</span>
                 <span className="mono" style={{ fontSize: 10, color: "rgba(255,255,255,0.35)", width: 60 }}>{label}:</span>

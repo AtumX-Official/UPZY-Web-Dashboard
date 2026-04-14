@@ -1,9 +1,10 @@
 import { useState, useEffect } from "react";
 import { COLORS } from "../constants";
 import { NavBar } from "../components/Shared";
+import { getDatabase, ref, get, set, remove, onValue } from "firebase/database";
 
-export function ScannerScreen({ onBack, showSnack }: { 
-  device?: any;
+export function ScannerScreen({ device, onBack, showSnack }: { 
+  device: any;
   onBack: () => void; 
   showSnack: (msg: string, color: string) => void; 
 }) {
@@ -16,99 +17,174 @@ export function ScannerScreen({ onBack, showSnack }: {
   const [wifiModal, setWifiModal] = useState<{ ip: string; name: string; network: string } | null>(null);
   const [ssid, setSsid] = useState("");
   const [pass, setPass] = useState("");
+  const [showPass, setShowPass] = useState(false);
 
   useEffect(() => {
     const t = setInterval(() => setRadarAngle(a => (a + 2) % 360), 16);
     return () => clearInterval(t);
+    pingDevices();
   }, []);
+
+  const pingDevices = async () => {
+    setStatus("Pinging devices...");
+    setDevices([]);
+
+    try {
+      const db = getDatabase();
+      const snap = await get(ref(db, "devices"));
+
+      if (!snap.exists()) {
+        setStatus("No devices found");
+        return;
+      }
+
+      const devicesObj = snap.val();
+      const deviceIds = Object.keys(devicesObj);
+
+      for (const deviceId of deviceIds) {
+
+        // 🔥 Send ping
+        await set(ref(db, `devices/${deviceId}/Question`), "ping");
+
+        // 🔥 Wait for Answer
+        const isOnline = await new Promise<boolean>((resolve) => {
+          const answerRef = ref(db, `devices/${deviceId}/Answer`);
+
+          let timeout: any;
+
+          const unsubscribe = onValue(answerRef, (snapshot) => {
+            const val = snapshot.val();
+
+            if (val === "pong" || val === "PONG") {
+              clearTimeout(timeout);
+              unsubscribe();
+              resolve(true);
+            }
+          });
+
+          timeout = setTimeout(() => {
+            unsubscribe();
+            resolve(false);
+          }, 4000);
+        });
+
+        if (isOnline) {
+          const name = devicesObj[deviceId]?.Name || "UPZY Device";
+
+          setDevices(prev => [
+            ...prev,
+            { ip: deviceId, name, network: "Firebase" }
+          ]);
+
+          // Auto-sync active device across the entire web app
+          if (device) {
+            device.setIpAddress(deviceId);
+            device.setIsOnline(true);
+          }
+        }
+      }
+
+      setStatus("Scan complete");
+
+    } catch {
+      setStatus("Error scanning");
+    }
+  };
 
   const scan = async () => {
     setIsScanning(true);
     setDevices([]);
     setProgress(0);
-    setStatus("Detecting System IP...");
+    setStatus("Fetching devices from Firebase...");
+    setLogs([]);
 
-    let sysIp = "Unknown";
     try {
-      const pc = new RTCPeerConnection({ iceServers: [] });
-      pc.createDataChannel("");
-      pc.createOffer().then(offer => pc.setLocalDescription(offer));
-      await new Promise<void>((resolve) => {
-        pc.onicecandidate = (ice) => {
-          if (ice?.candidate?.candidate) {
-            const match = /([0-9]{1,3}(\.[0-9]{1,3}){3})/.exec(ice.candidate.candidate);
-            if (match) { sysIp = match[1]; resolve(); }
+      const db = getDatabase();
+      const snap = await get(ref(db, "devices"));
+      if (!snap.exists()) {
+        setStatus("No UPZY devices found in database.");
+        setIsScanning(false);
+        return;
+      }
+
+      const devicesObj = snap.val();
+      const deviceIds = Object.keys(devicesObj);
+      let completed = 0;
+      const foundList: { ip: string; name: string; network: string }[] = [];
+
+      setStatus(`Pinging ${deviceIds.length} device(s)...`);
+
+      await Promise.all(deviceIds.map(async (deviceId) => {
+        setLogs(prev => [deviceId, ...prev]);
+
+        // Delete Answer & Send ping to Question
+        await remove(ref(db, `devices/${deviceId}/Answer`));
+        await set(ref(db, `devices/${deviceId}/Question`), "ping");
+
+        // Wait for Answer: pong
+        const isOnline = await new Promise<boolean>((resolve) => {
+          const answerRef = ref(db, `devices/${deviceId}/Answer`);
+          let timeout: ReturnType<typeof setTimeout>;
+          
+          const unsubscribe = onValue(answerRef, (snapshot) => {
+            const val = snapshot.val();
+            if (val === "pong" || val === "PONG") {
+              clearTimeout(timeout);
+              unsubscribe();
+              resolve(true);
+            }
+          });
+
+          timeout = setTimeout(() => {
+            unsubscribe();
+            resolve(false);
+          }, 4000);
+        });
+
+        if (isOnline) {
+          const name = devicesObj[deviceId]?.Name || "UPZY Device";
+          const newDevice = { ip: deviceId, name, network: "Firebase" };
+          foundList.push(newDevice);
+          setDevices(prev => [...prev, newDevice]);
+
+          // Auto-sync active device across the entire web app
+          if (device) {
+            device.setIpAddress(deviceId);
+            device.setIsOnline(true);
           }
-        };
-        setTimeout(resolve, 1500);
-      });
-      pc.close();
-    } catch (e) {}
+        }
 
-    setStatus(sysIp !== "Unknown" ? `System IP: ${sysIp}` : "Scanning networks...");
-    if (sysIp !== "Unknown") await new Promise(r => setTimeout(r, 1200));
-
-    // const subnetStr = sysIp !== "Unknown" ? sysIp.split('.').slice(0, 3).join('.') + '.*' : 'subnet';
-
-    // Build a list of IPs to scan
-    const ipSet = new Set<string>();
-
-    // Testing specific IP directly
-    ipSet.add("192.168.1.33");
-
-    const ipsToTry = Array.from(ipSet);
-    const foundList: { ip: string; name: string; network: string }[] = [];
-    let completed = 0;
-    setProgress(0);
-
-    // Scan IPs in chunks to prevent browser network queue limits
-    const chunkSize = 10; // Browser network limit overcome panna reduced size
-    for (let i = 0; i < ipsToTry.length; i += chunkSize) {
-      const chunk = ipsToTry.slice(i, i + chunkSize);
-      
-      // Add chunk of IPs to the top of our log list
-      setLogs(prev => [...chunk, ...prev]);
-
-      await Promise.all(chunk.map(async (ip) => {
-        setStatus(`Pinging ${ip}...`);
-        try {
-          const res = await fetch(`http://${ip}:143/ping`, { signal: AbortSignal.timeout(4000) });
-          const body = await res.text();
-          if (body.trim().startsWith("PONG")) {
-            const name = body.includes(":") ? body.split(":").slice(1).join(":").trim() : "UPZY Device";
-            foundList.push({ ip, name, network: ip === "192.168.4.1" ? "Hotspot" : "WiFi" });
-          }
-        } catch {}
-        
         completed++;
-        setProgress(completed / ipsToTry.length);
+        setProgress(completed / deviceIds.length);
       }));
-    }
 
-    if (foundList.length > 0) {
-      setDevices(foundList);
-      setStatus(`${foundList.length} device(s) found`);
-    } else {
-      setStatus("No UPZY devices found.");
+      if (foundList.length > 0) {
+        setStatus(`${foundList.length} device(s) found`);
+      } else {
+        setStatus("No UPZY devices responding.");
+      }
+    } catch (e) {
+      setStatus("Error scanning devices.");
     }
     setIsScanning(false);
   };
 
   const sendWifi = async (d: { ip: string }) => {
     try {
-      await fetch(`http://${d.ip}:143/network`, {
-        method: "POST", headers: { "Content-Type": "text/plain" },
-        body: `SSID:${ssid},PASS:${pass}`,
-        signal: AbortSignal.timeout(3000),
+      const db = getDatabase();
+      await set(ref(db, `devices/${d.ip}/Network`), {
+        SSID: ssid,
+        PASS: pass
       });
       showSnack("Credentials sent! Restarting...", COLORS.teal);
     } catch { showSnack("Could not reach device", COLORS.coral); }
-    setWifiModal(null); setSsid(""); setPass("");
+    setWifiModal(null); setSsid(""); setPass(""); setShowPass(false);
   };
 
-  const sendCmd = async (ip: string, endpoint: string) => {
+  const sendCmd = async (deviceId: string, cmd: string) => {
     try {
-      await fetch(`http://${ip}:143${endpoint}`, { signal: AbortSignal.timeout(3000) });
+      const db = getDatabase();
+      await set(ref(db, `devices/${deviceId}/Mode`), cmd);
       showSnack("Command sent", COLORS.teal);
     } catch { showSnack("Failed to send command", COLORS.coral); }
   };
@@ -138,7 +214,7 @@ export function ScannerScreen({ onBack, showSnack }: {
       <NavBar title="Network Scan" onBack={onBack} right={
         <div style={{ display: "flex", gap: 8 }}>
           {devices.length > 0 && <span className="mono" style={{ fontSize: 9, fontWeight: 600, color: COLORS.coral, background: `${COLORS.coral}1F`, border: `1px solid ${COLORS.coral}4D`, borderRadius: 20, padding: "4px 10px" }}>{devices.length} found</span>}
-          <button onClick={isScanning ? undefined : scan} style={{ opacity: isScanning ? 0.3 : 1, fontSize: 18 }}>🔄</button>
+          <button onClick={pingDevices} style={{ fontSize: 18 }}></button>
         </div>
       } />
 
@@ -173,7 +249,7 @@ export function ScannerScreen({ onBack, showSnack }: {
                 <div style={{ width: 40, height: 40, borderRadius: 13, background: `${COLORS.teal}1A`, border: `1px solid ${COLORS.teal}40`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20 }}>💾</div>
                 <div style={{ flex: 1 }}>
                   <div style={{ fontSize: 13, fontWeight: 700 }}>{d.name}</div>
-                  <div className="mono" style={{ fontSize: 10, color: COLORS.teal, marginTop: 3 }}>{d.ip} : 143</div>
+                  <div className="mono" style={{ fontSize: 10, color: COLORS.teal, marginTop: 3 }}>ID: {d.ip}</div>
                   <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
                     {([["ONLINE", COLORS.teal, true], [d.network, COLORS.coral, false]] as const).map(([label, color, dot], j) => (
                       <span key={j} className="mono" style={{ fontSize: 9, fontWeight: 600, color, background: `${color}1A`, border: `1px solid ${color}47`, borderRadius: 6, padding: "3px 8px", display: "flex", alignItems: "center", gap: dot ? 4 : 0 }}>
@@ -186,13 +262,13 @@ export function ScannerScreen({ onBack, showSnack }: {
               <div style={{ borderTop: "1px solid rgba(255,255,255,0.05)", paddingTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>
                 <button onClick={() => setWifiModal(d)} style={{ width: "100%", padding: "10px 0", borderRadius: 12, background: `${COLORS.violet}14`, border: `1px solid ${COLORS.violet}47`, fontSize: 11, fontWeight: 600, color: COLORS.violet, fontFamily: "'IBM Plex Mono', monospace" }}>📶 Change WiFi</button>
                 <div style={{ display: "flex", gap: 8 }}>
-                  {[["LOCAL", "🔌", COLORS.teal, "/Local"], ["NETWORK", "🌐", COLORS.amber, "/ssid"]].map(([label, icon, color, ep], j) => (
-                    <button key={j} onClick={() => sendCmd(d.ip, ep)} style={{ flex: 1, padding: "10px 0", borderRadius: 12, background: `${color}14`, border: `1px solid ${color}47`, fontSize: 11, fontWeight: 600, color, fontFamily: "'IBM Plex Mono', monospace" }}>{icon} {label}</button>
+                  {[["LOCAL", "🔌", COLORS.teal, "Local"], ["WIFI", "🌐", COLORS.amber, "Wifi"]].map(([label, icon, color, cmd], j) => (
+                    <button key={j} onClick={() => sendCmd(d.ip, cmd as string)} style={{ flex: 1, padding: "10px 0", borderRadius: 12, background: `${color}14`, border: `1px solid ${color}47`, fontSize: 11, fontWeight: 600, color, fontFamily: "'IBM Plex Mono', monospace" }}>{icon} {label}</button>
                   ))}
                 </div>
               </div>
             </div>
-          </div>
+          </div> 
         ))}
 
         {isScanning && (
@@ -208,7 +284,7 @@ export function ScannerScreen({ onBack, showSnack }: {
             }}>
               {logs.map((log, idx) => (
                 <div key={idx} className="mono" style={{ fontSize: 10, color: idx < 30 && isScanning ? COLORS.teal : "rgba(255,255,255,0.3)", marginBottom: 4 }}>
-                  {idx < 30 && isScanning ? "➜" : "✓"} {log}:143 - ping
+                  {idx < 30 && isScanning ? "➜" : "✓"} {log} - ping
                 </div>
               ))}
             </div>
@@ -221,11 +297,17 @@ export function ScannerScreen({ onBack, showSnack }: {
           <div style={{ width: "100%", maxWidth: 360, background: COLORS.bgSurface, borderRadius: 20, border: `1px solid ${COLORS.violet}4D`, padding: 24 }}>
             <h2 style={{ fontSize: 16, fontWeight: 700, marginBottom: 20 }}>Change WiFi</h2>
             {([["ssid", "Network name (SSID)", ssid, setSsid, false], ["pass", "Password", pass, setPass, true]] as const).map(([id, placeholder, val, setter, obscure]) => (
-              <input key={id} type={obscure ? "password" : "text"} placeholder={placeholder} value={val} onChange={e => (setter as any)(e.target.value)}
-                style={{ width: "100%", marginBottom: 12, padding: "12px 16px", background: COLORS.bgCard, border: `1px solid ${COLORS.violet}33`, borderRadius: 12, color: "white", fontFamily: "Syne", fontSize: 13 }} />
+              <div key={id} style={{ position: "relative", marginBottom: 12 }}>
+                <input type={obscure && !showPass ? "password" : "text"} placeholder={placeholder} value={val} onChange={e => (setter as any)(e.target.value)}
+                  style={{ width: "100%", padding: "12px 16px", paddingRight: obscure ? 40 : 16, background: COLORS.bgCard, border: `1px solid ${COLORS.violet}33`, borderRadius: 12, color: "white", fontFamily: "Syne", fontSize: 13 }} />
+                {obscure && (
+                  <button onClick={() => setShowPass(!showPass)} style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", fontSize: 16, background: "none", border: "none", cursor: "pointer", opacity: 0.7 }}>
+                    {showPass ? "🙈" : "👁️"}
+                  </button>
+                )}
+              </div>
             ))}
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 12, marginTop: 8 }}>
-              <button onClick={() => setWifiModal(null)} style={{ color: "rgba(255,255,255,0.4)", fontFamily: "Syne" }}>Cancel</button>
               <button onClick={() => sendWifi(wifiModal)} style={{ padding: "8px 20px", borderRadius: 10, background: COLORS.violet, fontWeight: 700, fontFamily: "Syne" }}>Send</button>
             </div>
           </div>

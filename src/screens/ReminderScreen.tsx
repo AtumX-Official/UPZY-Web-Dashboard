@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { COLORS } from "../constants";
 import { NavBar, FieldTile, ShimmerBtn } from "../components/Shared";
+import { getDatabase, ref, set } from "firebase/database";
 
 export function ReminderScreen({ device, onBack, showSnack }: { 
   device: any; 
@@ -22,9 +23,17 @@ export function ReminderScreen({ device, onBack, showSnack }: {
     const hNum = parseInt(h), period = hNum >= 12 ? "PM" : "AM";
     const h12 = hNum % 12 || 12;
     const formattedTime = `${h12}:${min} ${period}`;
+    const payload = `Title:${title} Date:${formattedDate} Time:${time}`;
+
     try {
-      await fetch(`http://${device.ipAddress}:143/Remainder/${encodeURIComponent(title)}:${formattedDate}:${formattedTime}`, { signal: AbortSignal.timeout(4000) });
-      showSnack("Reminder sent to device", COLORS.teal);
+      // 1. Send via Firebase
+      const db = getDatabase();
+      await set(ref(db, `devices/${device.ipAddress}/Remainder`), payload);
+
+      // 2. Try Local Network (ignore if fails)
+      try { await fetch(`http://${device.ipAddress}:143/Remainder/${encodeURIComponent(title)}:${formattedDate}:${formattedTime}`, { signal: AbortSignal.timeout(3000) }); } catch (e) {} 
+
+      showSnack("Reminder sent to Firebase & device", COLORS.teal);
       setTitle(""); setDate(""); setTime("");
     } catch { showSnack("Failed to send reminder", COLORS.coral); }
     setSending(false);

@@ -8,20 +8,37 @@ import { ReminderScreen } from "./screens/ReminderScreen";
 import { TimeScreen } from "./screens/TimeScreen.tsx";
 import { StatusScreen } from "./screens/StatusScreen";
 
+// Import the functions you need from the SDKs you need
+import { initializeApp } from "firebase/app";
+import { getDatabase, ref, get, child, set } from "firebase/database"; 
+
+// Your web app's Firebase configuration
+const firebaseConfig = {
+  apiKey: "AIzaSyASWAZBKP-WdKWVeoqVjkEOq5IK5b0sOtM",
+  authDomain: "upzy-93cfb.firebaseapp.com",
+  databaseURL: "https://upzy-93cfb-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "upzy-93cfb",
+  storageBucket: "upzy-93cfb.firebasestorage.app",
+  messagingSenderId: "791246156859",
+  appId: "1:791246156859:web:bbbcebb282e26398f5581e",
+  measurementId: "G-LJC8ES4YE7"
+};
+
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
+const db = getDatabase(app);
+
 function useDeviceState() {
   const [ipAddress, setIpAddress] = useState<string | null>(localStorage.getItem("upzy_ip"));
   const [isOnline, setIsOnline] = useState(false);
 
-  // App.tsx la ping function மாத்துங்க
   const ping = async (ip: string) => {
     try {
-      await fetch(`http://${ip}:143/ping`, { 
-        signal: AbortSignal.timeout(2000),
-        mode: 'no-cors'
-      });
-      return true;  // request reached = device online
+      // Check if device path is accessible to verify Firebase connectivity
+      await get(child(ref(db), `devices/${ip}`));
+      return true;
     } catch { 
-      return false;  // timeout or network error = offline
+      return false;
     }
   };
 
@@ -56,7 +73,9 @@ export default function App() {
       const now = new Date();
       const date = `${String(now.getDate()).padStart(2,"0")}-${String(now.getMonth()+1).padStart(2,"0")}-${now.getFullYear()}`;
       const time = `${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}:${String(now.getSeconds()).padStart(2,"0")}`;
-      try { await fetch(`http://${ip}:143/Live/${date}|${time}`, { signal: AbortSignal.timeout(2000) }); } catch {}
+      try {
+        await set(ref(db, `devices/${ip}/Live`), `${date}|${time}`);
+      } catch {}
     }
   };
 

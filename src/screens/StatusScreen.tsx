@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { COLORS } from "../constants";
 import { NavBar } from "../components/Shared";
+import { getDatabase, ref, set, remove, onValue } from "firebase/database";
 
 export function StatusScreen({ device, onBack }: { device: any; onBack: () => void }) {
   const [loading, setLoading] = useState(true);
@@ -11,10 +12,43 @@ export function StatusScreen({ device, onBack }: { device: any; onBack: () => vo
     setLoading(true); setStatusText(""); setError("");
     if (!device.ipAddress) { setError("Device is offline.\nAuto-connecting in background..."); setLoading(false); return; }
     try {
-      const res = await fetch(`http://${device.ipAddress}:143/status`, { signal: AbortSignal.timeout(4000) });
-      const body = await res.text();
-      setStatusText(body || "No response from device.");
-    } catch { setError("Failed to fetch status.\nMake sure device is on the same network."); }
+      const db = getDatabase();
+      
+      // 1. Delete the old DeviceReply completely so we don't read stale data
+      await remove(ref(db, `devices/${device.ipAddress}/DeviceReply`));
+      
+      // 2. Setup the listener BEFORE triggering (to catch very fast ESP32 replies)
+      const replyPromise = new Promise<string>((resolve, reject) => {
+        const replyRef = ref(db, `devices/${device.ipAddress}/DeviceReply`);
+        let timeout: ReturnType<typeof setTimeout>;
+
+        const unsubscribe = onValue(replyRef, (snap) => {
+          const val = snap.val();
+          if (val) {
+            clearTimeout(timeout);
+            unsubscribe();
+            resolve(String(val));
+          }
+        });
+
+        timeout = setTimeout(() => {
+          unsubscribe();
+          reject(new Error("timeout"));
+        }, 8000); // Wait up to 8 seconds for ESP32 to respond
+      });
+
+      // 3. THEN send the trigger to the ESP32
+      await set(ref(db, `devices/${device.ipAddress}/DeviceStatus`), "True");
+
+      // 4. Wait for the ESP32 to respond
+      const reply = await replyPromise;
+
+      setStatusText(reply || "No response from device.");
+      
+      // 5. Cleanup the trigger
+      await set(ref(db, `devices/${device.ipAddress}/DeviceStatus`), "False");
+
+    } catch { setError("Failed to fetch status..."); }
     setLoading(false);
   }, [device.ipAddress]);
 
@@ -22,19 +56,37 @@ export function StatusScreen({ device, onBack }: { device: any; onBack: () => vo
 
   const parse = () => {
     const raw: Record<string, string> = {};
-    for (const line of statusText.split("\n")) {
+    // The device sends a single line, space-separated string.
+    // We convert it to a multi-line string by adding a newline before each uppercase key
+    // to make it parsable line-by-line.
+    const processedStatusText = statusText.replace(/\s([A-Z_]+:)/g, '\n$1');
+
+    for (const line of processedStatusText.split("\n")) {
       const idx = line.indexOf(":");
       if (idx === -1) continue;
       raw[line.slice(0, idx).trim()] = line.slice(idx + 1).trim();
     }
+
     const deviceName = raw.DEVICE_NAME || "-";
     const wifiName = raw.WIFI_NAME || "-";
     const mode = raw.MODE || "-";
     const time = raw.TIME || "-";
-    const titles = (raw.REMAINDER_TITLE || "").split("|").filter(Boolean);
-    const dates = (raw.REMAINDER_DATE || "").split("|").filter(Boolean);
-    const times = (raw.REMAINDER_TIME || "").split("|").filter(Boolean);
-    return { deviceName, wifiName, mode, time, titles, dates, times };
+
+    const reminders: { title: string; date: string; time: string }[] = [];
+    if (raw.REMAINDER_TITLE && raw.REMAINDER_TITLE.trim() !== "") {
+      const titles = raw.REMAINDER_TITLE.split("|").filter(Boolean);
+      const dates = (raw.REMAINDER_DATE || "").split("|");
+      const times = (raw.REMAINDER_TIME || "").split("|");
+      
+      titles.forEach((t, i) => {
+        reminders.push({ title: t.trim(), date: (dates[i] || "-").trim(), time: (times[i] || "-").trim() });
+      });
+    }
+
+    // Reconstruct the storage string from individual fields to display in the UI.
+    const storage = `[FIRMWARE SPACE]\nUsed: ${raw.FLASH_USED || '-'}\nAvailable: ${raw.FLASH_FREE || '-'}\n\n[RAM MEMORY]\nUsed: ${raw.RAM_USED || '-'}\nAvailable: ${raw.RAM_FREE || '-'}\n\n[NVS STORAGE]\nUsed: ${raw.NVS_USED || '-'}\nAvailable: ${raw.NVS_FREE || '-'}`;
+
+    return { deviceName, wifiName, mode, time, storage, reminders };
   };
 
   return (
@@ -52,8 +104,7 @@ export function StatusScreen({ device, onBack }: { device: any; onBack: () => vo
             <p style={{ color: "rgba(255,255,255,0.55)", fontSize: 14, textAlign: "center", lineHeight: 1.6, whiteSpace: "pre-line" }}>{error}</p>
           </div>
         ) : (() => {
-          const { deviceName, wifiName, mode, time, titles, dates, times } = parse();
-          const count = Math.min(titles.length, dates.length, times.length);
+          const { deviceName, wifiName, mode, time, reminders } = parse();
           return (
             <>
               <div style={{ borderRadius: 20, background: `linear-gradient(135deg, ${COLORS.bgSurface}, ${COLORS.bgDeep})`, border: `1px solid ${COLORS.amber}33`, overflow: "hidden", marginBottom: 24 }}>
@@ -68,15 +119,16 @@ export function StatusScreen({ device, onBack }: { device: any; onBack: () => vo
                   ))}
                 </div>
               </div>
+
               <span className="mono" style={{ fontSize: 9, letterSpacing: 3, fontWeight: 600, color: "rgba(255,255,255,0.22)" }}>REMINDERS</span>
               <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 10 }}>
-                {count === 0 ? <p style={{ color: "rgba(255,255,255,0.35)", fontSize: 13 }}>No reminders saved on device.</p> : Array.from({ length: count }, (_, i) => (
+                {reminders.length === 0 ? <p style={{ color: "rgba(255,255,255,0.35)", fontSize: 13 }}>No reminders saved on device.</p> : reminders.map((rem, i) => (
                   <div key={i} style={{ borderRadius: 18, background: `linear-gradient(135deg, ${COLORS.bgSurface}, ${COLORS.bgDeep})`, border: `1px solid ${COLORS.violet}2E`, overflow: "hidden" }}>
                     <div style={{ height: 1, background: `linear-gradient(90deg, transparent, ${COLORS.violet}80, transparent)` }} />
                     <div style={{ padding: 14 }}>
                       <span className="mono" style={{ fontSize: 9, fontWeight: 600, color: COLORS.violet, background: `${COLORS.violet}1A`, border: `1px solid ${COLORS.violet}40`, borderRadius: 7, padding: "4px 10px" }}>REMINDER {String(i + 1).padStart(2, "0")}</span>
                       <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 6 }}>
-                        {[["🏷️", "Title", titles[i]], ["📅", "Date", dates[i]], ["⏰", "Time", times[i]]].map(([icon, label, val]) => (
+                        {[["🏷️", "Title", rem.title], ["📅", "Date", rem.date], ["⏰", "Time", rem.time]].map(([icon, label, val]) => (
                           <div key={label} style={{ display: "flex", alignItems: "center", gap: 8 }}>
                             <span style={{ fontSize: 13, color: `${COLORS.violet}BF` }}>{icon}</span>
                             <span className="mono" style={{ fontSize: 9, color: "rgba(255,255,255,0.28)", width: 32 }}>{label}:</span>
