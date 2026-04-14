@@ -9,7 +9,7 @@ export function TimeScreen({ device, onBack, showSnack }: {
   showSnack: (msg: string, color: string) => void; 
 }) {
   const [syncing, setSyncing] = useState(false);
-  const [lastSync, setLastSync] = useState<Date | null>(null);
+  const [, setLastSync] = useState<Date | null>(null);
   const [now, setNow] = useState(new Date());
 
   useEffect(() => {
